@@ -24,11 +24,6 @@ class LoyaltyService:
         # Convert points to a fixed monetary value.
         return round(points * 0.01, 2)
 
-    def restore(self, account_id: str, points: int) -> None:
-        if points <= 0:
-            return
-        self._balances[account_id] = self._balances.get(account_id, 0) + points
-
     def clawback(self, account_id: str, points: int) -> None:
         # Remove points when an order is refunded or fails after accrual.
         if points <= 0:

@@ -68,11 +68,9 @@ class OrderService:
             return OrderResult(status="insufficient_stock", reason="not_enough_inventory")
 
         loyalty_credit = None
-        redeemed_points = 0
         if order.loyalty_points_to_apply:
             try:
-                redeemed_points = order.loyalty_points_to_apply
-                loyalty_credit = self._loyalty.redeem(order.account_id, redeemed_points)
+                loyalty_credit = self._loyalty.redeem(order.account_id, order.loyalty_points_to_apply)
             except Exception as exc:
                 return OrderResult(status="loyalty_failed", reason=str(exc))
 
@@ -87,21 +85,15 @@ class OrderService:
 
         risk = self._fraud.score(order_total=pricing.total, region=order.region)
         if risk.is_blocked:
-            if redeemed_points:
-                self._loyalty.restore(order.account_id, redeemed_points)
             self._audit.log("order_blocked", order.account_id, order.sku, risk.reason or "blocked")
             return OrderResult(status="blocked", pricing=pricing, reason=risk.reason)
         if risk.needs_review:
-            if redeemed_points:
-                self._loyalty.restore(order.account_id, redeemed_points)
             self._audit.log("order_review", order.account_id, order.sku, risk.reason or "review")
             return OrderResult(status="manual_review", pricing=pricing, reason=risk.reason)
 
         try:
             self._payment_gateway.charge(order.account_id, pricing.total)
         except Exception as exc:
-            if redeemed_points:
-                self._loyalty.restore(order.account_id, redeemed_points)
             self._audit.log("payment_failed", order.account_id, order.sku, str(exc))
             return OrderResult(status="payment_failed", pricing=pricing, reason=str(exc))
 
