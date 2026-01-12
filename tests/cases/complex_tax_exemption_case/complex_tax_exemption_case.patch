@@ -1,0 +1,70 @@
+--- a/src/catalog.py
++++ b/src/catalog.py
+@@ -13,6 +13,7 @@
+     weight_kg: float
+     category: str
+     is_fragile: bool = False
++    is_tax_exempt: bool = False
+ 
+ 
+ class CatalogService:
+@@ -40,6 +41,15 @@
+                 weight_kg=0.3,
+                 category="hardware",
+             ),
++            "support-plan": Product(
++                sku="support-plan",
++                name="Support Plan (1y)",
++                price=120.0,
++                weight_kg=0.0,
++                category="services",
++                is_fragile=False,
++                is_tax_exempt=True,
++            ),
+         }
+ 
+     def get(self, sku: str) -> Product:
+--- a/src/pricing.py
++++ b/src/pricing.py
+@@ -55,6 +55,7 @@
+             raise ValueError("Quantity must be positive")
+ 
+         product = self._catalog.get(sku)
++        tax_exempt = getattr(product, "is_tax_exempt", False)
+         subtotal = product.price * quantity
+ 
+         promo = self._promotions.apply_coupon(product, quantity, coupon_code)
+@@ -63,7 +64,12 @@
+ 
+         shipping = 0.0 if promo.free_shipping else self.SHIPPING_BY_METHOD.get(shipping_method, 0.0)
+         taxable_amount = max(0.0, subtotal - discount) + shipping
+-        tax_breakdown = self._tax.calculate(taxable_amount, region, category=product.category)
++        tax_breakdown = self._tax.calculate(
++            taxable_amount,
++            region,
++            category=product.category,
++            tax_exempt=tax_exempt,
++        )
+ 
+         total = taxable_amount + tax_breakdown.amount
+         if apply_loyalty:
+--- a/src/tax.py
++++ b/src/tax.py
+@@ -20,8 +20,16 @@
+         "UK": {"default": 0.17},
+     }
+ 
+-    def calculate(self, taxable_amount: float, region: str, category: str = "default") -> TaxBreakdown:
++    def calculate(
++        self,
++        taxable_amount: float,
++        region: str,
++        category: str = "default",
++        tax_exempt: bool = False,
++    ) -> TaxBreakdown:
+         region_rates = self.REGIONAL_RATES.get(region, {"default": 0.0})
+         rate = region_rates.get(category, region_rates.get("default", 0.0))
++        if tax_exempt or taxable_amount <= 0:
++            return TaxBreakdown(rate=0.0 if tax_exempt else rate, amount=0.0, region=region, category=category)
+         amount = taxable_amount * rate
+         return TaxBreakdown(rate=rate, amount=amount, region=region, category=category)

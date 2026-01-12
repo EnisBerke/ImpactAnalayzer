@@ -1,0 +1,54 @@
+diff --git a/src/order_service.py b/src/order_service.py
+index 7dd8b3d..436393e 100644
+--- a/src/order_service.py
++++ b/src/order_service.py
+@@ -63,9 +63,17 @@ class OrderService:
+ 
+     def place_order(self, order: Order) -> OrderResult:
+         """Return fulfillment state after attempting to reserve stock."""
+-        required = order.quantity + max(self._safety_stock, 0)
+-        if not self._inventory.has_enough(order.sku, required):
+-            return OrderResult(status="insufficient_stock", reason="not_enough_inventory")
++        reserved_with_buffer = False
++        if self._safety_stock > 0:
++            reserved_with_buffer = self._inventory.reserve_with_buffer(
++                order.sku,
++                order.quantity,
++                self._safety_stock,
++            )
++            if not reserved_with_buffer:
++                return OrderResult(status="insufficient_stock", reason="not_enough_inventory_with_buffer")
++        elif not self._inventory.has_enough(order.sku, order.quantity):
++            return OrderResult(status="insufficient_stock", reason="not_enough_inventory")
+ 
+         loyalty_credit = None
+         if order.loyalty_points_to_apply:
+@@ -85,20 +93,27 @@ class OrderService:
+         )
+ 
+         risk = self._fraud.score(order_total=pricing.total, region=order.region)
+         if risk.is_blocked:
++            if reserved_with_buffer:
++                self._inventory.add_item(order.sku, order.quantity)
+             self._audit.log("order_blocked", order.account_id, order.sku, risk.reason or "blocked")
+             return OrderResult(status="blocked", pricing=pricing, reason=risk.reason)
+         if risk.needs_review:
++            if reserved_with_buffer:
++                self._inventory.add_item(order.sku, order.quantity)
+             self._audit.log("order_review", order.account_id, order.sku, risk.reason or "review")
+             return OrderResult(status="manual_review", pricing=pricing, reason=risk.reason)
+ 
+         try:
+             self._payment_gateway.charge(order.account_id, pricing.total)
+         except Exception as exc:
++            if reserved_with_buffer:
++                self._inventory.add_item(order.sku, order.quantity)
+             self._audit.log("payment_failed", order.account_id, order.sku, str(exc))
+             return OrderResult(status="payment_failed", pricing=pricing, reason=str(exc))
+ 
+-        self._inventory.remove_item(order.sku, order.quantity)
++        if not reserved_with_buffer:
++            self._inventory.remove_item(order.sku, order.quantity)
+ 
+         label = None
+         if order.shipping_address:

@@ -1,0 +1,29 @@
+--- a/src/shipping.py
++++ b/src/shipping.py
+@@ -38,6 +38,7 @@
+         method: str = "standard",
+         carrier: str = "DHL",
+     ) -> ShippingLabel:
++        self._validate_address(address)
+         if not self._is_supported(method):
+             raise ValueError(f"Unsupported shipping method: {method}")
+ 
+@@ -57,5 +58,18 @@
+     def _is_supported(self, method: str) -> bool:
+         return method in {"standard", "express"}
+ 
++    def _validate_address(self, address: Address) -> None:
++        required_fields = {
++            "name": address.name,
++            "line1": address.line1,
++            "city": address.city,
++            "region": address.region,
++            "postal_code": address.postal_code,
++            "country": address.country,
++        }
++        for field, value in required_fields.items():
++            if not value or not value.strip():
++                raise ValueError(f"Missing address field: {field}")
++
+     def get_label(self, order_id: str) -> Optional[ShippingLabel]:
+         return self._issued.get(order_id)

@@ -1,0 +1,113 @@
+diff --git a/src/catalog.py b/src/catalog.py
+index 4d16916..aa61c3d 100644
+--- a/src/catalog.py
++++ b/src/catalog.py
+@@ -13,6 +13,7 @@ class Product:
+     weight_kg: float
+     category: str
+     is_fragile: bool = False
++    is_hazardous: bool = False
+ 
+ 
+ class CatalogService:
+@@ -32,6 +33,7 @@ class CatalogService:
+                 weight_kg=0.8,
+                 category="widgets",
+                 is_fragile=True,
++                is_hazardous=False,
+             ),
+             "bolt-pack": Product(
+                 sku="bolt-pack",
+@@ -39,6 +41,7 @@ class CatalogService:
+                 price=15.0,
+                 weight_kg=0.3,
+                 category="hardware",
++                is_hazardous=False,
+             ),
+         }
+ 
+diff --git a/src/pricing.py b/src/pricing.py
+index e96a0c4..e73d72e 100644
+--- a/src/pricing.py
++++ b/src/pricing.py
+@@ -6,6 +6,7 @@ from typing import Optional
+ 
+ from catalog import CatalogService
+ from promotions import PromotionService
++from shipping import ShippingService
+ from tax import TaxService
+ 
+ 
+@@ -37,10 +38,12 @@ class PricingService:
+         catalog: CatalogService,
+         promotions: PromotionService,
+         tax: TaxService,
++        shipping: ShippingService,
+     ) -> None:
+         self._catalog = catalog
+         self._promotions = promotions
+         self._tax = tax
++        self._shipping = shipping
+ 
+     def calculate(
+         self,
+@@ -61,7 +64,7 @@ class PricingService:
+         category_discount = self._promotions.category_discount(product)
+         discount = promo.discount + (category_discount * quantity)
+ 
+-        shipping = 0.0 if promo.free_shipping else self.SHIPPING_BY_METHOD.get(shipping_method, 0.0)
++        shipping = 0.0 if promo.free_shipping else self._shipping.quote(product, quantity, shipping_method)
+         taxable_amount = max(0.0, subtotal - discount) + shipping
+         tax_breakdown = self._tax.calculate(taxable_amount, region, category=product.category)
+ 
+diff --git a/src/shipping.py b/src/shipping.py
+index 540959c..4f517e6 100644
+--- a/src/shipping.py
++++ b/src/shipping.py
+@@ -4,6 +4,8 @@ from __future__ import annotations
+ from dataclasses import dataclass
+ from typing import Optional
+ 
++from catalog import Product
++
+ 
+ @dataclass
+ class Address:
+@@ -31,25 +33,35 @@ class ShippingService:
+     def __init__(self) -> None:
+         self._issued: dict[str, ShippingLabel] = {}
+ 
++    def quote(self, product: Product, quantity: int, method: str = "standard") -> float:
++        if not self._is_supported(method):
++            raise ValueError(f"Unsupported shipping method: {method}")
++        base = 5.0 if method == "standard" else 12.0
++        weight = product.weight_kg * quantity
++        weight_fee = max(0.0, (weight - 1.0)) * 2.0  # fee for weights over 1kg
++        fragile_fee = 3.0 if product.is_fragile else 0.0
++        hazardous_fee = 8.0 if getattr(product, "is_hazardous", False) else 0.0
++        return round(base + weight_fee + fragile_fee + hazardous_fee, 2)
++
+     def create_label(
+         self,
+         order_id: str,
+         address: Address,
+         method: str = "standard",
+         carrier: str = "DHL",
++        cost: Optional[float] = None,
+     ) -> ShippingLabel:
+         if not self._is_supported(method):
+             raise ValueError(f"Unsupported shipping method: {method}")
+ 
+         tracking = f"{carrier}-{order_id}-TRACK"
+-        cost = 5.0 if method == "standard" else 12.0
+         label = ShippingLabel(
+             order_id=order_id,
+             carrier=carrier,
+             method=method,
+             tracking_number=tracking,
+             address=address,
+-            cost=cost,
++            cost=cost if cost is not None else (5.0 if method == "standard" else 12.0),
+         )
+         self._issued[order_id] = label
+         return label
